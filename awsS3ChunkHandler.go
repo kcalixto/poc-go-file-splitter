@@ -34,6 +34,7 @@ func (h *AWSS3ChunkHandler) Save(c *Chunk) error {
 
 	ctx := context.Background()
 	start := time.Now()
+	fmt.Printf("Saving: %s.csv...\n", name)
 	_, err := h.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(fmt.Sprintf("input/%s.csv", name)),
