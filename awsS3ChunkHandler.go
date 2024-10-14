@@ -17,7 +17,7 @@ type AWSS3ChunkHandler struct {
 	client *s3.Client
 }
 
-func (h *AWSS3ChunkHandler) Save(c *Chunk) error {
+func (h AWSS3ChunkHandler) Save(c *Chunk) error {
 	name := uuid.New().String()
 	if h.client == nil {
 		cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion("sa-east-1"))
