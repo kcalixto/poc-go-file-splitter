@@ -16,7 +16,7 @@ func (h *MockChunkHandler) Save(c *Chunk) error {
 func BenchmarkFileBroker(b *testing.B) {
 	mockChunkHandler := &MockChunkHandler{}
 
-	broker := NewFileBroker(5, int(1024*1024*10), mockChunkHandler)
+	broker := NewFileBroker(5, time.Second, int(1024*1024*10), mockChunkHandler)
 	start := time.Now()
 	b.ResetTimer()
 	b.ReportAllocs()

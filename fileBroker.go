@@ -11,24 +11,28 @@ import (
 )
 
 type FileBroker struct {
-	wg                  *sync.WaitGroup
-	chunksChan          chan *Chunk
-	errsChan            chan error
-	maxChunkSizeInBytes int
-	chunkHandler        ChunkHandler
+	wg                        *sync.WaitGroup
+	maxConcurrentWorkers      int
+	delayUntilInvokeNewWorker time.Duration
+	chunksChan                chan *Chunk
+	errsChan                  chan error
+	maxChunkSizeInBytes       int
+	chunkHandler              ChunkHandler
 }
 
 func NewFileBroker(
-	maxCachedChunks int,
+	maxConcurrentWorkers int,
+	delayUntilInvokeNewWorker time.Duration,
 	maxChunkSizeInBytes int,
 	chunkHandler ChunkHandler,
 ) *FileBroker {
 	return &FileBroker{
-		wg:                  &sync.WaitGroup{},
-		chunksChan:          make(chan *Chunk, maxCachedChunks),
-		errsChan:            make(chan error, maxCachedChunks),
-		maxChunkSizeInBytes: maxChunkSizeInBytes,
-		chunkHandler:        chunkHandler,
+		wg:                   &sync.WaitGroup{},
+		maxConcurrentWorkers: maxConcurrentWorkers,
+		chunksChan:           make(chan *Chunk),
+		errsChan:             make(chan error),
+		maxChunkSizeInBytes:  maxChunkSizeInBytes,
+		chunkHandler:         chunkHandler,
 	}
 }
 
@@ -37,8 +41,6 @@ func (b *FileBroker) Exec(fileName string) error {
 	if err != nil {
 		return err
 	}
-
-	go b.save()
 
 	h, err := reader.ReadString('\n') // read header
 	if err != nil {
@@ -53,46 +55,59 @@ func (b *FileBroker) Exec(fileName string) error {
 	buf.Write(header)
 
 	fmt.Printf("Started execution at %s\n", time.Now().Format(time.TimeOnly))
-	for {
-		if err := b.read(reader, buf); err != nil {
-			if err == io.EOF {
+	endChan := make(chan struct{})
+	go func() {
+		for {
+			if err := b.read(reader, buf); err != nil {
+				if err == io.EOF {
+					b.chunksChan <- &Chunk{
+						data: buf.Bytes(),
+						from: lastSavedLine + 1,
+						to:   lineCounter,
+					}
+					// fmt.Printf("sending file from %d to %d\n", lastSavedLine+1, lineCounter)
+					buf = new(bytes.Buffer)
+					lastSavedLine = lineCounter
+
+					break
+				}
+				panic(err) // file reading error
+			}
+
+			if buf.Len() >= b.maxChunkSizeInBytes {
 				b.chunksChan <- &Chunk{
 					data: buf.Bytes(),
 					from: lastSavedLine + 1,
 					to:   lineCounter,
 				}
 				// fmt.Printf("sending file from %d to %d\n", lastSavedLine+1, lineCounter)
-				buf = new(bytes.Buffer)
+				buf = bytes.NewBuffer(make([]byte, 0, b.maxChunkSizeInBytes+avgLineSizeBytes))
+				buf.Write(header)
 				lastSavedLine = lineCounter
-
-				break
 			}
-			return err
+
+			lineCounter++
+		}
+		close(b.chunksChan)
+		b.wg.Wait()
+		close(b.errsChan)
+
+		for err := range b.errsChan {
+			fmt.Println("Error saving file: ", err)
 		}
 
-		if buf.Len() >= b.maxChunkSizeInBytes {
-			b.chunksChan <- &Chunk{
-				data: buf.Bytes(),
-				from: lastSavedLine + 1,
-				to:   lineCounter,
-			}
-			// fmt.Printf("sending file from %d to %d\n", lastSavedLine+1, lineCounter)
-			buf = bytes.NewBuffer(make([]byte, 0, b.maxChunkSizeInBytes+avgLineSizeBytes))
-			buf.Write(header)
-			lastSavedLine = lineCounter
+		endChan <- struct{}{}
+		fmt.Println("All files saved")
+	}()
+
+	for i := 0; i < b.maxConcurrentWorkers; i++ {
+		if b.delayUntilInvokeNewWorker > 0 {
+			time.Sleep(b.delayUntilInvokeNewWorker)
 		}
-
-		lineCounter++
-	}
-	close(b.chunksChan)
-	b.wg.Wait()
-	close(b.errsChan)
-
-	for err := range b.errsChan {
-		fmt.Println("Error saving file: ", err)
+		go b.save()
 	}
 
-	fmt.Println("All files saved")
+	<-endChan
 	return nil
 }
 
@@ -123,13 +138,9 @@ func (b *FileBroker) read(in *bufio.Reader, out *bytes.Buffer) error {
 
 func (b *FileBroker) save() {
 	for f := range b.chunksChan {
-		b.wg.Add(1)
-		go func(f *Chunk) {
-			defer b.wg.Done()
-			err := b.chunkHandler.Save(f)
-			if err != nil {
-				b.errsChan <- err
-			}
-		}(f)
+		err := b.chunkHandler.Save(f)
+		if err != nil {
+			b.errsChan <- err
+		}
 	}
 }
