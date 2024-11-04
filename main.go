@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"time"
 )
@@ -11,6 +12,12 @@ func main() {
 		panic("FILE_PATH env var is required")
 	}
 
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("Error: %v\n", r)
+			fmt.Printf("panicked at %s\n", time.Now().String())
+		}
+	}()
 	if err := NewFileBroker(
 		5,                             // maxConcurrentWorkers
 		time.Duration(time.Second*30), // delayUntilInvokeNewWorker
