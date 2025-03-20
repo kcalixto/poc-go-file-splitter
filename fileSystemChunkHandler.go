@@ -6,17 +6,14 @@ import (
 	"io"
 	"os"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 type LocalFileSystemHandler struct{}
 
 func (h LocalFileSystemHandler) Save(c *Chunk) error {
-	name := uuid.New().String()
-	fmt.Println("Saving file... ", name)
+	fmt.Printf("Saving %s...\n", c.name)
 	time.Sleep(1 * time.Second)
-	file, err := os.Create(fmt.Sprintf("out/%s.csv", name))
+	file, err := os.Create(fmt.Sprintf("out/%s.csv", c.name))
 	if err != nil {
 		return err
 	}
